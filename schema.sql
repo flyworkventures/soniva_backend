@@ -1,8 +1,8 @@
 -- Soniva - MySQL veritabanı şeması
 
--- Veritabanı: db_aimusic 
+-- Veritabanı: flywork1_aimusic 
 
-USE db_aimusic;
+USE flywork1_aimusic;
 
 -- Kullanıcılar (Firebase Auth ile senkronize)
 CREATE TABLE IF NOT EXISTS users (

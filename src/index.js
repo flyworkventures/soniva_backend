@@ -9,6 +9,7 @@ const authRoutes = require("./routes/auth");
 const usersRoutes = require("./routes/users");
 const tracksRoutes = require("./routes/tracks");
 const sunoRoutes = require("./routes/suno");
+const geminiRoutes = require("./routes/gemini");
 
 if (!fs.existsSync(path.join(__dirname, "../uploads"))) {
   fs.mkdirSync(path.join(__dirname, "../uploads"), { recursive: true });
@@ -25,6 +26,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/tracks", tracksRoutes);
 app.use("/api/suno", sunoRoutes);
+app.use("/api/gemini", geminiRoutes);
 
 const uploadsPath = path.join(__dirname, "../uploads");
 const mimeTypes = { ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png" };

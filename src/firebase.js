@@ -27,6 +27,7 @@ async function verifyIdToken(token) {
     const decoded = await admin.auth().verifyIdToken(token);
     return decoded;
   } catch (err) {
+    console.error("[Firebase] verifyIdToken failed:", err.message || err);
     return null;
   }
 }

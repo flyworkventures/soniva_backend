@@ -5,6 +5,7 @@ const config = require("../config");
 const { query } = require("../db");
 const { authMiddleware } = require("../middleware/auth");
 const { downloadToUploads } = require("../utils/download");
+const { verifyUserSubscription } = require("../services/subscriptionVerifier");
 
 const router = express.Router();
 const upload = multer({
@@ -50,13 +51,104 @@ router.post("/:userId/credits/add", async (req, res) => {
     return res.status(403).json({ error: "Forbidden" });
   }
   const { delta } = req.body;
+  const deltaNum = parseInt(delta, 10);
+  if (isNaN(deltaNum)) {
+    return res.status(400).json({ error: "Invalid delta" });
+  }
   try {
+    // Negatif delta (kredi düşümü): yeterli bakiye kontrolü
+    if (deltaNum < 0) {
+      const [rows] = await query(
+        "SELECT credits FROM users WHERE id = ?",
+        [req.params.userId]
+      );
+      const current = rows[0]?.credits ?? 0;
+      if (current + deltaNum < 0) {
+        return res.status(402).json({
+          error: "Insufficient credits",
+          credits: current,
+          required: Math.abs(deltaNum),
+        });
+      }
+    }
     await query(
       "UPDATE users SET credits = credits + ?, updated_at = NOW() WHERE id = ?",
-      [delta, req.params.userId]
+      [deltaNum, req.params.userId]
     );
     res.json({ success: true });
   } catch (err) {
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+router.get("/:userId/subscription/verify", async (req, res) => {
+  if (req.user.uid !== req.params.userId) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const userId = req.params.userId;
+  try {
+    const result = await verifyUserSubscription(userId);
+    if (result === null) {
+      return res.status(503).json({
+        error: "Subscription verification unavailable",
+        active: false,
+      });
+    }
+    if (result.active) {
+      const subRows = await query(
+        "SELECT id, expires_at FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+        [userId]
+      );
+      const sub = subRows[0];
+      const storedExpiry = sub?.expires_at
+        ? new Date(sub.expires_at).getTime()
+        : 0;
+      const newExpiry = result.expiryTimeMillis || 0;
+      const isRenewal = newExpiry > storedExpiry;
+      if (isRenewal || storedExpiry === 0) {
+        await query(
+          "UPDATE users SET credits = ?, updated_at = NOW() WHERE id = ?",
+          [result.credits, userId]
+        );
+        if (newExpiry > 0 && sub?.id) {
+          await query(
+            "UPDATE subscriptions SET expires_at = FROM_UNIXTIME(?) WHERE id = ?",
+            [Math.floor(newExpiry / 1000), sub.id]
+          );
+        }
+      }
+      const creditsRows = await query(
+        "SELECT credits FROM users WHERE id = ?",
+        [userId]
+      );
+      const credits = creditsRows?.[0]?.credits ?? result.credits;
+      return res.json({ active: true, credits });
+    }
+    await query(
+      "UPDATE users SET credits = 0, updated_at = NOW() WHERE id = ?",
+      [userId]
+    );
+    await query("DELETE FROM subscriptions WHERE user_id = ?", [userId]);
+    return res.json({ active: false, credits: 0 });
+  } catch (err) {
+    console.error("Subscription verify error:", err);
+    return res.status(500).json({ error: "Database error", active: false });
+  }
+});
+
+router.post("/:userId/subscription/clear", async (req, res) => {
+  if (req.user.uid !== req.params.userId) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const userId = req.params.userId;
+  try {
+    await query("UPDATE users SET credits = 0, updated_at = NOW() WHERE id = ?", [
+      userId,
+    ]);
+    await query("DELETE FROM subscriptions WHERE user_id = ?", [userId]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Subscription clear error:", err);
     res.status(500).json({ error: "Database error" });
   }
 });
@@ -157,7 +249,7 @@ router.post("/:userId/tracks", async (req, res) => {
     let audioUrl = data.audioUrl || null;
     let imageUrl = data.imageUrl || null;
     try {
-      const base = (config.uploadsBaseUrl || "").replace(/\/$/, "") || "https://siteadresiniz.com";
+      const base = (config.uploadsBaseUrl || "").replace(/\/$/, "") || "https://soniva.fly-work.com";
       if (data.audioUrl) {
         const audioFile = await Promise.race([
           downloadToUploads(data.audioUrl, "audio", "mp3"),
